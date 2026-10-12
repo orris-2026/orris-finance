@@ -2642,7 +2642,7 @@
         <div class="charts-row">
           <div class="chart-card">
             <div class="chart-title">نسبة تحقيق التارجت</div>
-            <div class="chart-sub">مقياس دائري لكل بائع</div>
+            <div class="chart-sub">مقياس دائري لكل بائع (مبيعات خارج أودو)</div>
             <div style="display:flex;justify-content:center;padding:20px 0;overflow-x:auto;">
               <svg id="target-gauges-svg" width="280" height="136" viewBox="0 0 280 136" class="ichart">
               </svg>
@@ -2650,7 +2650,7 @@
             <div class="mini-insight">
               <div class="mini-insight-row"><span>إجمالي التارجت المشترك</span><span id="target-joint-total">0
                   ر.س</span></div>
-              <div class="mini-insight-row"><span>المحقق حتى الآن</span><span class="pos" id="target-achieved-total">0
+              <div class="mini-insight-row"><span>المحقق حتى الآن (خارج أودو)</span><span class="pos" id="target-achieved-total">0
                   ر.س</span></div>
             </div>
           </div>
@@ -2688,7 +2688,7 @@
 
         <div class="table-card">
           <div class="table-header">
-            <div class="table-title">جدول حساب التارجت والعمولات الشامل (أودو + مبيعات خارجية)</div>
+            <div class="table-title">جدول حساب التارجت والعمولات (مبيعات خارج أودو)</div>
           </div>
           <div class="table-scroll">
             <table>
@@ -2699,7 +2699,7 @@
                   <th>نسبة العمولة</th>
                   <th>مبيعات أودو</th>
                   <th>مبيعات خارجية</th>
-                  <th>إجمالي المحقق</th>
+                  <th>إجمالي المحقق (خارج أودو)</th>
                   <th>نسبة الإنجاز</th>
                   <th>قيمة العمولة المستحقة</th>
                 </tr>
@@ -5842,11 +5842,11 @@
         const subscriptions = json.subscriptions || [];
         const subscriptionActuals = json.subscription_actuals || {};
         const fixedPayments = json.fixed_payments || null;
+        renderIncomeStatement(data, suppliers, manualExpenses);
         renderSales(data, targets, manualSales);
         renderClients(clients);
         renderSuppliers(suppliers);
         renderProjects(projects, data, suppliers);
-        renderIncomeStatement(data, suppliers, manualExpenses);
         renderRatios(data, suppliers, manualExpenses);
         renderOverview(data, targets, suppliers, projects, manualExpenses);
         renderDashboardSubscriptions(subscriptions, subscriptionActuals);
@@ -29794,11 +29794,11 @@
         renderDepartmentsTable();
         renderDeptReport();
 
+        renderIncomeStatement(data, suppliers, manualExpenses);
         renderSales(data, targets, manualSales);
         renderClients(clients);
         renderSuppliers(suppliers);
         renderProjects(projects, data, suppliers);
-        renderIncomeStatement(data, suppliers, manualExpenses);
         renderRatios(data, suppliers, manualExpenses);
         renderOverview(data, targets, suppliers, projects, manualExpenses);
         if (typeof updateProjectedCashKPIs === 'function') updateProjectedCashKPIs();
@@ -32827,19 +32827,44 @@
       </tr>`;
       });
 
-      document.getElementById("sales-untaxed").innerText = u.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      document.getElementById("sales-tax").innerText = t.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      document.getElementById("sales-paid").innerText = p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      document.getElementById("sales-residual").innerText = r.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      // الحصول على إجمالي الإيرادات المعتمدة من قائمة الدخل والربح والخسارة لتوحيد الأرقام 100%
+      let pnlRevenue = 0;
+      if (window.incomeStatementSummary && window.incomeStatementSummary.totalRevenue) {
+        pnlRevenue = window.incomeStatementSummary.totalRevenue;
+      } else if (window.cachedJson && window.cachedJson.profit_and_loss && window.cachedJson.profit_and_loss.revenue) {
+        pnlRevenue = num(window.cachedJson.profit_and_loss.revenue);
+      } else {
+        const plLines = (window.cachedJson && window.cachedJson.pl_lines) || [];
+        plLines.forEach(l => {
+          if (!isYear2026(l.date)) return;
+          const code = (l.code || "").toString().trim();
+          const typ = (l.type || "").toString().toLowerCase();
+          if (typ === "income" || code.startsWith("31")) {
+            pnlRevenue += (num(l.credit) - num(l.debit));
+          }
+        });
+      }
 
-      const grandSum = p + r;
-      const pPct = grandSum > 0 ? p / grandSum : 0;
-      const rPct = grandSum > 0 ? r / grandSum : 0;
+      // مطابقة صافي المبيعات مع إيرادات قائمة الدخل واحتساب الضريبة والمحصل والمتبقي بدقة تامة
+      const finalUntaxed = (pnlRevenue > 0) ? pnlRevenue : u;
+      const finalTax = (pnlRevenue > 0) ? (pnlRevenue * 0.15) : t;
+      const totalWithTax = finalUntaxed + finalTax;
+      const finalPaid = Math.min(p, totalWithTax);
+      const finalResidual = Math.max(0, totalWithTax - finalPaid);
+
+      document.getElementById("sales-untaxed").innerText = finalUntaxed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById("sales-tax").innerText = finalTax.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById("sales-paid").innerText = finalPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById("sales-residual").innerText = finalResidual.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      const grandSum = finalPaid + finalResidual;
+      const pPct = grandSum > 0 ? finalPaid / grandSum : 0;
+      const rPct = grandSum > 0 ? finalResidual / grandSum : 0;
 
       document.getElementById("bar-paid-rect").setAttribute("width", (pPct * 230).toFixed(1));
-      document.getElementById("bar-paid-txt").textContent = p.toLocaleString(undefined, { maximumFractionDigits: 0 });
+      document.getElementById("bar-paid-txt").textContent = finalPaid.toLocaleString(undefined, { maximumFractionDigits: 0 });
       document.getElementById("bar-residual-rect").setAttribute("width", (rPct * 230).toFixed(1));
-      document.getElementById("bar-residual-txt").textContent = r.toLocaleString(undefined, { maximumFractionDigits: 0 });
+      document.getElementById("bar-residual-txt").textContent = finalResidual.toLocaleString(undefined, { maximumFractionDigits: 0 });
       document.getElementById("collection-pct").innerText = (pPct * 100).toFixed(1) + "%";
       const salesAnalysisPctEl = document.getElementById("sales-analysis-pct");
       if (salesAnalysisPctEl) salesAnalysisPctEl.innerText = (pPct * 100).toFixed(1) + "%";
@@ -32890,11 +32915,12 @@
         });
 
         let manualAchieved = manualSellerSales[sName] || 0;
-        let totalAchieved = odooAchieved + manualAchieved;
-        const achPctVal = targetVal > 0 ? (totalAchieved / targetVal) * 100 : 0;
-        const commissionEarned = totalAchieved * commRateVal;
+        // نسبة تحقيق التارجت والمحقق تحسب فقط للمبيعات من خارج أودو وتترك مبيعات أودو دون جمعها
+        let targetAchieved = manualAchieved;
+        const achPctVal = targetVal > 0 ? (targetAchieved / targetVal) * 100 : 0;
+        const commissionEarned = targetAchieved * commRateVal;
 
-        sellerPerformances.push({ name: sName, achieved: totalAchieved, target: targetVal, pct: achPctVal });
+        sellerPerformances.push({ name: sName, achieved: targetAchieved, manual: manualAchieved, odoo: odooAchieved, target: targetVal, pct: achPctVal });
 
         let badge = '<span class="badge info">قيد التقدم</span>';
         if (achPctVal >= 100) badge = '<span class="badge active">مكتمل 🎯</span>';
@@ -32907,7 +32933,7 @@
         <td class="num muted-td">${(commRateVal * 100).toFixed(1)}%</td>
         <td class="num">${odooAchieved.toLocaleString()}</td>
         <td class="num">${manualAchieved > 0 ? manualAchieved.toLocaleString() : '—'}</td>
-        <td class="num pos" style="font-weight:700;">${totalAchieved.toLocaleString()}</td>
+        <td class="num pos" style="font-weight:700;">${targetAchieved > 0 ? targetAchieved.toLocaleString() : '—'}</td>
         <td class="num" style="font-weight:700; color:${achPctVal >= 100 ? 'var(--green)' : 'var(--orange)'};">${targetVal > 0 ? achPctVal.toFixed(1) + '%' : '—'}</td>
         <td class="num pos" style="font-weight:700;">${commissionEarned > 0 ? commissionEarned.toLocaleString() + ' ر.س' : '—'}</td>
       </tr>`;
@@ -32921,7 +32947,7 @@
         totalAchievedJoint += sp.achieved;
       });
       if (document.getElementById("target-joint-total")) {
-        document.getElementById("target-joint-total").innerText = totalTargetJoint > 0 ? (totalTargetJoint.toLocaleString() + " ر.س") : "31,000,000 ر.س";
+        document.getElementById("target-joint-total").innerText = totalTargetJoint > 0 ? (totalTargetJoint.toLocaleString() + " ر.س") : "0 ر.س";
       }
       if (document.getElementById("target-achieved-total")) {
         document.getElementById("target-achieved-total").innerText = totalAchievedJoint.toLocaleString() + " ر.س";
@@ -36107,11 +36133,11 @@ function renderProjects(projectsFromApi, invoicesData, suppliersData) {
         const sub = c.subscriptions || [];
         const sa = c.subscription_actuals || {};
 
+        renderIncomeStatement(d, s, me);
         renderProjects(p, d, s);
         renderSales(d, t, ms);
         renderClients(cl);
         renderSuppliers(s);
-        renderIncomeStatement(d, s, me);
         renderRatios(d, s, me);
         renderOverview(d, t, s, p, me);
         renderDashboardSubscriptions(sub, sa);
